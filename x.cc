@@ -124,6 +124,7 @@ public:
     compile(*blob);
     return blob;
   }
+  Expression(Type t): type(t) {}
   Expression(Type t, Int i): type(t), integer(i) {}
   Expression(Type t, std::initializer_list<Expression> es): type(t), children(es) {}
 };
@@ -261,6 +262,9 @@ int main() {
     }),
     Expression(Expression::Type::DEBUG_PRINT, {
       Expression(Expression::Type::INTEGER, 7)
+    }),
+    Expression(Expression::Type::DEBUG_PRINT, {
+      Expression(Expression::Type::NIL)
     })
   });
   VirtualMachine vm(ProgramCounter(e.compile(), 0));
