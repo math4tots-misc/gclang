@@ -25,6 +25,23 @@ public:
     string &operator=(const string&)=default;
 };
 
+// root garbage collected object.
+class CcObject {
+public:
+    virtual void traverse(void(*)(CcObject*))=0;
+};
+
+std::vector<CcObject**> stack;
+
+long markstack() { return stack.size(); }
+void retstack(long mark) { stack.resize(mark); }
+
+void stackvar(Int) {}
+void stackvar(Float) {}
+void stackvar(const char*) {}
+void stackvar(string) {}
+void stackvar(CcObject *&ptr) { stack.push_back(&ptr); }
+
 Int opadd(Int a, Int b) {
     return a + b;
 }
@@ -65,6 +82,14 @@ openpar = '('
 closepar = ')'
 openbk = '['
 closebk = ']'
+
+nexttempvarid = [0]
+
+
+def mktempvarname():
+    name = 'tempvar' + str(nexttempvarid[0])
+    nexttempvarid[0] += 1
+    return name
 
 
 class Ast(object):
@@ -246,7 +271,7 @@ class Int(Expression):
         self.value = value
 
     def cxx(self):
-        return str(self.value)
+        return str(self.value) + 'll'
 
 
 class CxxCall(Expression):
@@ -255,8 +280,17 @@ class CxxCall(Expression):
         self.args = args
 
     def cxx(self):
+        tempvarnames = [mktempvarname() for _ in range(len(self.args))]
         return ''.join([
-            self.fname, '(', ','.join(arg.cxx() for arg in self.args), ')'
+            '([&](){',
+            'const long mark = markstack(); ',
+            ' '.join(''.join([
+                'auto ', name, ' = ', arg.cxx(), '; ',
+                'stackvar(', name, ');'
+            ]) for name, arg in zip(tempvarnames, self.args)),
+            ' retstack(mark);',
+            ' return ', self.fname, '(', ', '.join(tempvarnames), ');',
+            '})()',
         ])
 
 
