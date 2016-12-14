@@ -110,7 +110,7 @@ class Declaration(Statement):
         self.expression = expression
 
     def extern(self):
-        return ''.join(['extern ', self.type.cxx(), ' vv', self.name, ';\n'])
+        return ''.join(['\nextern ', self.type.cxx(), ' vv', self.name, ';'])
 
     def definition(self):
         return ''.join([
