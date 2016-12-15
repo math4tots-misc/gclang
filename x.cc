@@ -30,6 +30,8 @@ class Table final: public Object {
 public:
   Table *proto;
   std::map<std::string*, Value> mapping;
+  Table(): proto(nullptr) {}
+  Table(Table *p): proto(p) {}
 };
 
 class Function final: public Object {
@@ -145,7 +147,7 @@ public:
   std::vector<ProgramCounter> retstack;
   std::vector<Table*> envstack;
   ProgramCounter pc;
-  VirtualMachine(const ProgramCounter &p): pc(p) {}
+  VirtualMachine(Table *t, const ProgramCounter &p): envstack({t}), pc(p) {}
   void run();
 };
 
@@ -267,7 +269,7 @@ int main() {
       Expression(Expression::Type::NIL)
     })
   });
-  VirtualMachine vm(ProgramCounter(e.compile(), 0));
+  VirtualMachine vm(new Table(), ProgramCounter(e.compile(), 0));
   vm.run();
   std::cout << "hi" << std::endl;
 }
