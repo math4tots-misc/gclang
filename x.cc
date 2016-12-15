@@ -153,8 +153,6 @@ public:
     return blob;
   }
   Expression()=default;
-  Expression(Type t): type(t) {}
-  Expression(Type t, Int i): type(t), integer(i) {}
 };
 
 std::string str(Expression::Type t) {
@@ -173,8 +171,17 @@ std::string str(Expression::Type t) {
   return "";
 }
 
+Expression nilexpr() {
+  Expression e;
+  e.type = Expression::Type::NIL;
+  return e;
+}
+
 Expression intexpr(Int i) {
-  return Expression(Expression::Type::INTEGER, i);
+  Expression e;
+  e.type = Expression::Type::INTEGER;
+  e.integer = i;
+  return e;
 }
 
 Expression declexpr(std::string *s, Expression v) {
@@ -387,7 +394,7 @@ int main() {
     printexpr(intexpr(7)),
     declexpr(intern("x"), intexpr(55371)),
     printexpr(varexpr(intern("x"))),
-    printexpr(Expression(Expression::Type::NIL))
+    printexpr(nilexpr())
   });
   VirtualMachine vm(new Table(), ProgramCounter(e.compile(), 0));
   vm.run();
