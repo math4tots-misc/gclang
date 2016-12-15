@@ -5,7 +5,7 @@
 #include <sstream>
 #include <iomanip>
 
-void error(const std::string &s) {
+std::string error(const std::string &s) {
   std::cerr << "ERROR: " << s << std::endl;
   throw s;
 }
@@ -131,13 +131,18 @@ class Blob final {
 public:
   std::vector<std::string*> args;
   std::vector<Instruction> instructions;
-  std::string str() {
+  std::string headers() {
     std::ostringstream ss;
-    ss << std::left;
     ss << "nargs = " << args.size();
     for (auto arg: args) {
       ss << " " << (*arg);
     }
+    return ss.str();
+  }
+  std::string str() {
+    std::ostringstream ss;
+    ss << std::left;
+    ss << headers();
     ss << std::endl;
     for (unsigned int i = 0; i < instructions.size(); i++) {
       ss << std::setw(7) << i << " ";
@@ -145,12 +150,20 @@ public:
       switch (instructions[i].type) {
       case Instruction::Type::IF:
       case Instruction::Type::ELSE:
+      case Instruction::Type::CALL:
       case Instruction::Type::PUSH_INTEGER:
         ss << instructions[i].integer;
         break;
       case Instruction::Type::DECLARE_VARIABLE:
       case Instruction::Type::PUSH_VARIABLE:
         ss << (*instructions[i].name);
+        break;
+      case Instruction::Type::PUSH_FUNCTION:
+        ss << ":";
+        for (auto arg: instructions[i].blob->args) {
+          ss << " " << (*arg);
+        }
+        break;
       default:
         break;
       }
@@ -215,11 +228,29 @@ Expression intexpr(Int i) {
   return e;
 }
 
+Expression funcexpr(std::vector<std::string*> args, Expression body) {
+  Expression e;
+  e.type = Expression::Type::LAMBDA;
+  e.names.assign(args.begin(), args.end());
+  e.children.push_back(body);
+  return e;
+}
+
 Expression declexpr(std::string *s, Expression v) {
   Expression e;
   e.type = Expression::Type::DECLARE;
   e.names.push_back(s);
   e.children.push_back(v);
+  return e;
+}
+
+Expression callexpr(Expression f, std::vector<Expression> args) {
+  Expression e;
+  e.type = Expression::Type::CALL;
+  e.children.push_back(f);
+  for (auto &arg: args) {
+    e.children.push_back(arg);
+  }
   return e;
 }
 
@@ -291,7 +322,7 @@ Value Table::get(std::string *key) const {
     return pair->second;
   } else {
     if (proto == nullptr) {
-      throw "No such name " + *key;
+      throw error("No such name " + *key);
     } else {
       return proto->get(key);
     }
@@ -302,7 +333,7 @@ void Table::declare(std::string *key, Value value) {
   if (mapping.find(key) == mapping.end()) {
     mapping[key] = value;
   } else {
-    throw "Already declared name " + *key;
+    throw error("Already declared name " + *key);
   }
 }
 
@@ -329,10 +360,10 @@ void Expression::compile(Blob &b) {
     b.instructions.push_back(Instruction(Instruction::Type::DECLARE_VARIABLE, names[0]));
     break;
   case Type::CALL:
-    children[0].compile(b);
     for (unsigned int i = 1; i < children.size(); i++) {
       children[i].compile(b);
     }
+    children[0].compile(b);
     b.instructions.push_back(Instruction(Instruction::Type::CALL, children.size()-1));
     break;
   case Type::DEBUG_PRINT:
@@ -373,11 +404,13 @@ void VirtualMachine::run() {
     if (pc.done()) {
       pc = retstack.back();
       retstack.pop_back();
+      envstack.pop_back();
     } else {
       Instruction &i = pc.get();
       std::cerr << "-----" << std::endl;
       std::cerr << "i.type = " << str(i.type) << std::endl;
       std::cerr << "evalstack.size() = " << evalstack.size() << std::endl;
+      std::cerr << "envstack.size() = " << envstack.size() << std::endl;
       switch (i.type) {
       case Instruction::Type::INVALID:
         error("Invalid instruction");
@@ -434,9 +467,36 @@ void VirtualMachine::run() {
       case Instruction::Type::ELSE:
         pc.move(i.integer);
         break;
-      // TODO: ---
       case Instruction::Type::PUSH_FUNCTION:
+        evalstack.push_back(Value(Value::Type::FUNCTION, new Function(envstack.back(), i.blob)));
+        pc.incr();
+        break;
       case Instruction::Type::CALL:
+        switch (evalstack.back().type) {
+          case Value::Type::FUNCTION: {
+            pc.incr();
+            retstack.push_back(pc);
+            auto f = evalstack.back().function();
+            evalstack.pop_back();
+            auto env = new Table(f->env);
+            envstack.push_back(env);
+            auto nargs = i.integer;
+            if (static_cast<unsigned long>(nargs) != f->blob->args.size()) {
+              error("Expected " + std::to_string(f->blob->args.size()) + " args but got " + std::to_string(nargs));
+            }
+            for (long j = 0; j < nargs; j++) {
+              env->declare(f->blob->args[j], evalstack[evalstack.size() - nargs + j]);
+            }
+            evalstack.resize(evalstack.size() - nargs);
+            pc = ProgramCounter(f->blob, 0);
+            break;
+          }
+          default:
+            error("Not calllable: " + str(evalstack.back().type));
+            break;
+        }
+        break;
+      // TODO: ---
       case Instruction::Type::TAILCALL:
         error("Not yet implemented");
       }
@@ -454,6 +514,11 @@ int main() {
     printexpr(ifexpr(nilexpr(), intexpr(11111), intexpr(222222))),
     declexpr(intern("x"), intexpr(55371)),
     printexpr(varexpr(intern("x"))),
+    declexpr(intern("f"), funcexpr({intern("a")}, blockexpr({
+      printexpr(varexpr(intern("a"))),
+    }))),
+    callexpr(varexpr(intern("f")), {intexpr(777777)}),
+    callexpr(varexpr(intern("f")), {intexpr(9999999999)}),
     printexpr(nilexpr())
   });
   Blob *blob = e.compile();
