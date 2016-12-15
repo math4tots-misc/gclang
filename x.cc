@@ -2,6 +2,8 @@
 #include <vector>
 #include <map>
 #include <iostream>
+#include <sstream>
+#include <iomanip>
 
 void error(const std::string &s) {
   std::cerr << "ERROR: " << s << std::endl;
@@ -59,6 +61,7 @@ public:
   Int integer() const { return i; }
   Table *table() const { return static_cast<Table*>(obj); }
   Function *function() const { return static_cast<Function*>(obj); }
+  bool truthy() const { return type != Type::NIL; }
 };
 
 std::string str(Value::Type t) {
@@ -100,6 +103,7 @@ public:
   Instruction(Type t, Int i): type(t), integer(i) {}
   Instruction(Type t, std::string *s): type(t), name(s) {}
   Instruction(Type t, Blob *b): type(t), blob(b) {}
+  std::string str();
 };
 
 std::string str(Instruction::Type t) {
@@ -127,6 +131,33 @@ class Blob final {
 public:
   std::vector<std::string*> args;
   std::vector<Instruction> instructions;
+  std::string str() {
+    std::ostringstream ss;
+    ss << std::left;
+    ss << "nargs = " << args.size();
+    for (auto arg: args) {
+      ss << " " << (*arg);
+    }
+    ss << std::endl;
+    for (unsigned int i = 0; i < instructions.size(); i++) {
+      ss << std::setw(7) << i << " ";
+      ss << std::setw(18) << ::str(instructions[i].type);
+      switch (instructions[i].type) {
+      case Instruction::Type::IF:
+      case Instruction::Type::ELSE:
+      case Instruction::Type::PUSH_INTEGER:
+        ss << instructions[i].integer;
+        break;
+      case Instruction::Type::DECLARE_VARIABLE:
+      case Instruction::Type::PUSH_VARIABLE:
+        ss << (*instructions[i].name);
+      default:
+        break;
+      }
+      ss << std::endl;
+    }
+    return ss.str();
+  }
 };
 
 class Expression final {
@@ -199,10 +230,17 @@ Expression varexpr(std::string *s) {
   return e;
 }
 
-Expression blockexpr(std::initializer_list<Expression> exprs) {
+Expression blockexpr(std::vector<Expression> exprs) {
   Expression e;
   e.type = Expression::Type::BLOCK;
-  e.children.assign(exprs);
+  e.children.assign(exprs.begin(), exprs.end());
+  return e;
+}
+
+Expression ifexpr(Expression cond, Expression a, Expression b) {
+  Expression e;
+  e.type = Expression::Type::IF;
+  e.children.assign({cond, a, b});
   return e;
 }
 
@@ -220,6 +258,7 @@ public:
   ProgramCounter(Blob *b, long i): blob(b), index(i) {}
   bool done() const { return static_cast<unsigned long>(index) >= blob->instructions.size(); }
   void incr() { index++; }
+  void move(long i) { index = i; }
   Instruction &get() { return blob->instructions[index]; }
 };
 
@@ -240,6 +279,10 @@ std::string *intern(const std::string &s) {
     internTable[s] = new std::string(s);
   }
   return internTable[s];
+}
+
+std::string Instruction::str() {
+  return ::str(type);
 }
 
 Value Table::get(std::string *key) const {
@@ -285,14 +328,13 @@ void Expression::compile(Blob &b) {
     children[0].compile(b);
     b.instructions.push_back(Instruction(Instruction::Type::DECLARE_VARIABLE, names[0]));
     break;
-  case Type::CALL: {
+  case Type::CALL:
     children[0].compile(b);
     for (unsigned int i = 1; i < children.size(); i++) {
       children[i].compile(b);
     }
     b.instructions.push_back(Instruction(Instruction::Type::CALL, children.size()-1));
     break;
-  }
   case Type::DEBUG_PRINT:
     children[0].compile(b);
     b.instructions.push_back(Instruction(Instruction::Type::DEBUG_PRINT));
@@ -311,8 +353,16 @@ void Expression::compile(Blob &b) {
       b.instructions.push_back(Instruction(Instruction::Type::BLOCK_END));
     }
     break;
-  case Type::IF:  // TODO
-    error("NOT IMPLEMENTED");
+  case Type::IF:
+    children[0].compile(b);
+    long ifpos = b.instructions.size();
+    b.instructions.push_back(Instruction(Instruction::Type::IF));
+    children[1].compile(b);
+    long elsepos = b.instructions.size();
+    b.instructions.push_back(Instruction(Instruction::Type::ELSE));
+    children[2].compile(b);
+    b.instructions[ifpos].integer = elsepos + 1;
+    b.instructions[elsepos].integer = b.instructions.size();
     break;
   }
 }
@@ -373,10 +423,19 @@ void VirtualMachine::run() {
         evalstack.push_back(envstack.back()->get(i.name));
         pc.incr();
         break;
+      case Instruction::Type::IF:
+        if (evalstack.back().truthy()) {
+          pc.incr();
+        } else {
+          pc.move(i.integer);
+        }
+        evalstack.pop_back();
+        break;
+      case Instruction::Type::ELSE:
+        pc.move(i.integer);
+        break;
       // TODO: ---
       case Instruction::Type::PUSH_FUNCTION:
-      case Instruction::Type::IF:
-      case Instruction::Type::ELSE:
       case Instruction::Type::CALL:
       case Instruction::Type::TAILCALL:
         error("Not yet implemented");
@@ -392,11 +451,14 @@ int main() {
   auto e = blockexpr({
     printexpr(intexpr(124124)),
     printexpr(intexpr(7)),
+    printexpr(ifexpr(nilexpr(), intexpr(11111), intexpr(222222))),
     declexpr(intern("x"), intexpr(55371)),
     printexpr(varexpr(intern("x"))),
     printexpr(nilexpr())
   });
-  VirtualMachine vm(new Table(), ProgramCounter(e.compile(), 0));
+  Blob *blob = e.compile();
+  std::cout << blob->str() << std::endl;
+  VirtualMachine vm(new Table(), ProgramCounter(blob, 0));
   vm.run();
   std::cerr << "hi" << std::endl;
   return 0;
