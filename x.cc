@@ -79,6 +79,8 @@ public:
     PUSH_INTEGER,  // pushes value 'integer'
     PUSH_FUNCTION,  // pushes a function using 'blob' and current environment
     DECLARE_VARIABLE,  // declares variable using value popped from stack
+    BLOCK_START,  // pushes a new env on the envstack
+    BLOCK_END,  // pops envstack
     IF,  // jump to 'integer' if false (i.e. jump to else clause)
     ELSE,  // unconditional jump to 'integer' (i.e. jump to end of else)
     POP,  // pops value on top of stack -- between blocks
@@ -194,11 +196,13 @@ void Expression::compile(Blob &b) {
     if (children.empty()) {
       b.instructions.push_back(Instruction(Instruction::Type::PUSH_NIL));
     } else {
+      b.instructions.push_back(Instruction(Instruction::Type::BLOCK_START));
       for (unsigned long i = 0; i < children.size() - 1; i++) {
         children[i].compile(b);
         b.instructions.push_back(Instruction(Instruction::Type::POP));
       }
       children.back().compile(b);
+      b.instructions.push_back(Instruction(Instruction::Type::BLOCK_END));
     }
     break;
   case Type::IF:  // TODO
@@ -238,6 +242,14 @@ void VirtualMachine::run() {
         break;
       case Instruction::Type::POP:
         evalstack.pop_back();
+        pc.incr();
+        break;
+      case Instruction::Type::BLOCK_START:
+        envstack.push_back(new Table(envstack.back()));
+        pc.incr();
+        break;
+      case Instruction::Type::BLOCK_END:
+        envstack.pop_back();
         pc.incr();
         break;
       // TODO: ---
