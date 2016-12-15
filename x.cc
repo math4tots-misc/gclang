@@ -155,7 +155,6 @@ public:
   Expression()=default;
   Expression(Type t): type(t) {}
   Expression(Type t, Int i): type(t), integer(i) {}
-  Expression(Type t, std::initializer_list<Expression> es): type(t), children(es) {}
 };
 
 std::string str(Expression::Type t) {
@@ -190,6 +189,20 @@ Expression varexpr(std::string *s) {
   Expression e;
   e.type = Expression::Type::VARIABLE;
   e.names.push_back(s);
+  return e;
+}
+
+Expression blockexpr(std::initializer_list<Expression> exprs) {
+  Expression e;
+  e.type = Expression::Type::BLOCK;
+  e.children.assign(exprs);
+  return e;
+}
+
+Expression printexpr(Expression v) {
+  Expression e;
+  e.type = Expression::Type::DEBUG_PRINT;
+  e.children.push_back(v);
   return e;
 }
 
@@ -369,20 +382,12 @@ void VirtualMachine::run() {
 }
 
 int main() {
-  auto e = Expression(Expression::Type::BLOCK, {
-    Expression(Expression::Type::DEBUG_PRINT, {
-      Expression(Expression::Type::INTEGER, 124124)
-    }),
-    Expression(Expression::Type::DEBUG_PRINT, {
-      Expression(Expression::Type::INTEGER, 7)
-    }),
+  auto e = blockexpr({
+    printexpr(intexpr(124124)),
+    printexpr(intexpr(7)),
     declexpr(intern("x"), intexpr(55371)),
-    Expression(Expression::Type::DEBUG_PRINT, {
-      varexpr(intern("x")),
-    }),
-    Expression(Expression::Type::DEBUG_PRINT, {
-      Expression(Expression::Type::NIL)
-    })
+    printexpr(varexpr(intern("x"))),
+    printexpr(Expression(Expression::Type::NIL))
   });
   VirtualMachine vm(new Table(), ProgramCounter(e.compile(), 0));
   vm.run();
