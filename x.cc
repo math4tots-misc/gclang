@@ -32,6 +32,8 @@ public:
   std::map<std::string*, Value> mapping;
   Table(): proto(nullptr) {}
   Table(Table *p): proto(p) {}
+  Value get(std::string *key) const;
+  void declare(std::string *key, Value value);
 };
 
 class Function final: public Object {
@@ -100,6 +102,27 @@ public:
   Instruction(Type t, Blob *b): type(t), blob(b) {}
 };
 
+std::string str(Instruction::Type t) {
+  switch (t) {
+  case Instruction::Type::INVALID: return "INVALID";
+  case Instruction::Type::PUSH_NIL: return "PUSH_NIL";
+  case Instruction::Type::PUSH_VARIABLE: return "PUSH_VARIABLE";
+  case Instruction::Type::PUSH_INTEGER: return "PUSH_INTEGER";
+  case Instruction::Type::PUSH_FUNCTION: return "PUSH_FUNCTION";
+  case Instruction::Type::DECLARE_VARIABLE: return "DECLARE_VARIABLE";
+  case Instruction::Type::BLOCK_START: return "BLOCK_START";
+  case Instruction::Type::BLOCK_END: return "BLOCK_END";
+  case Instruction::Type::IF: return "IF";
+  case Instruction::Type::ELSE: return "ELSE";
+  case Instruction::Type::POP: return "POP";
+  case Instruction::Type::CALL: return "CALL";
+  case Instruction::Type::TAILCALL: return "TAILCALL";
+  case Instruction::Type::DEBUG_PRINT: return "DEBUG_PRINT";
+  }
+  error("Invalid Instruction::Type = " + std::to_string(static_cast<int>(t)));
+  return "";
+}
+
 class Blob final {
 public:
   std::vector<std::string*> args;
@@ -109,13 +132,14 @@ public:
 class Expression final {
 public:
   enum class Type {
-    NIL,
-    INTEGER,
-    LAMBDA,
-    DECLARE,
-    CALL,
-    IF,
-    BLOCK,
+    NIL,  // nil
+    INTEGER,  // integer
+    VARIABLE,  // variable
+    LAMBDA,  // TODO
+    DECLARE,  // names[0] -> eval(children[0])
+    CALL,  // apply(eval(children[0]), map(eval, children[1...])
+    IF,  // eval(children[0]) ? eval(children[1]) : eval(children[2])
+    BLOCK,  // eval(children[-1])
     DEBUG_PRINT,
   };
   Type type;
@@ -128,10 +152,46 @@ public:
     compile(*blob);
     return blob;
   }
+  Expression()=default;
   Expression(Type t): type(t) {}
   Expression(Type t, Int i): type(t), integer(i) {}
   Expression(Type t, std::initializer_list<Expression> es): type(t), children(es) {}
 };
+
+std::string str(Expression::Type t) {
+  switch (t) {
+  case Expression::Type::NIL: return "NIL";
+  case Expression::Type::INTEGER: return "INTEGER";
+  case Expression::Type::VARIABLE: return "VARIABLE";
+  case Expression::Type::LAMBDA: return "LAMBDA";
+  case Expression::Type::DECLARE: return "DECLARE";
+  case Expression::Type::CALL: return "CALL";
+  case Expression::Type::IF: return "IF";
+  case Expression::Type::BLOCK: return "BLOCK";
+  case Expression::Type::DEBUG_PRINT: return "DEBUG_PRINT";
+  }
+  error("Invalid Expression::Type = " + std::to_string(static_cast<int>(t)));
+  return "";
+}
+
+Expression intexpr(Int i) {
+  return Expression(Expression::Type::INTEGER, i);
+}
+
+Expression declexpr(std::string *s, Expression v) {
+  Expression e;
+  e.type = Expression::Type::DECLARE;
+  e.names.push_back(s);
+  e.children.push_back(v);
+  return e;
+}
+
+Expression varexpr(std::string *s) {
+  Expression e;
+  e.type = Expression::Type::VARIABLE;
+  e.names.push_back(s);
+  return e;
+}
 
 class ProgramCounter final {
 public:
@@ -162,6 +222,27 @@ std::string *intern(const std::string &s) {
   return internTable[s];
 }
 
+Value Table::get(std::string *key) const {
+  auto pair = mapping.find(key);
+  if (pair != mapping.end()) {
+    return pair->second;
+  } else {
+    if (proto == nullptr) {
+      throw "No such name " + *key;
+    } else {
+      return proto->get(key);
+    }
+  }
+}
+
+void Table::declare(std::string *key, Value value) {
+  if (mapping.find(key) == mapping.end()) {
+    mapping[key] = value;
+  } else {
+    throw "Already declared name " + *key;
+  }
+}
+
 void Expression::compile(Blob &b) {
   switch (type) {
   case Type::NIL:
@@ -169,6 +250,9 @@ void Expression::compile(Blob &b) {
     break;
   case Type::INTEGER:
     b.instructions.push_back(Instruction(Instruction::Type::PUSH_INTEGER, integer));
+    break;
+  case Type::VARIABLE:
+    b.instructions.push_back(Instruction(Instruction::Type::PUSH_VARIABLE, names[0]));
     break;
   case Type::LAMBDA: {
     Blob *blob = new Blob;
@@ -178,6 +262,7 @@ void Expression::compile(Blob &b) {
     break;
   }
   case Type::DECLARE:
+    children[0].compile(b);
     b.instructions.push_back(Instruction(Instruction::Type::DECLARE_VARIABLE, names[0]));
     break;
   case Type::CALL: {
@@ -198,6 +283,7 @@ void Expression::compile(Blob &b) {
     } else {
       b.instructions.push_back(Instruction(Instruction::Type::BLOCK_START));
       for (unsigned long i = 0; i < children.size() - 1; i++) {
+        std::cerr << "Compiling block i = " << i << " " << str(children[i].type) << std::endl;
         children[i].compile(b);
         b.instructions.push_back(Instruction(Instruction::Type::POP));
       }
@@ -212,14 +298,20 @@ void Expression::compile(Blob &b) {
 }
 
 void VirtualMachine::run() {
-  std::cout << "VirtualMachine::run" << std::endl;
+  std::cerr << "VirtualMachine::run" << std::endl;
   while (!(retstack.empty() && pc.done())) {
     if (pc.done()) {
       pc = retstack.back();
       retstack.pop_back();
     } else {
       Instruction &i = pc.get();
+      std::cerr << "-----" << std::endl;
+      std::cerr << "i.type = " << str(i.type) << std::endl;
+      std::cerr << "evalstack.size() = " << evalstack.size() << std::endl;
       switch (i.type) {
+      case Instruction::Type::INVALID:
+        error("Invalid instruction");
+        break;
       case Instruction::Type::PUSH_NIL:
         evalstack.push_back(Value());
         pc.incr();
@@ -249,24 +341,31 @@ void VirtualMachine::run() {
         pc.incr();
         break;
       case Instruction::Type::BLOCK_END:
+        std::cerr << "envstack.size() = " << envstack.size() << std::endl;
         envstack.pop_back();
         pc.incr();
         break;
-      // TODO: ---
-      case Instruction::Type::INVALID:
-        error("Invalid instruction");
+      case Instruction::Type::DECLARE_VARIABLE:
+        envstack.back()->declare(i.name, evalstack.back());
+        pc.incr();
         break;
       case Instruction::Type::PUSH_VARIABLE:
+        evalstack.push_back(envstack.back()->get(i.name));
+        pc.incr();
+        break;
+      // TODO: ---
       case Instruction::Type::PUSH_FUNCTION:
-      case Instruction::Type::DECLARE_VARIABLE:
       case Instruction::Type::IF:
       case Instruction::Type::ELSE:
       case Instruction::Type::CALL:
       case Instruction::Type::TAILCALL:
         error("Not yet implemented");
       }
+      // std::cerr << "2 i.type = " << str(i.type) << std::endl;
+      std::cerr << "2 evalstack.size() = " << evalstack.size() << std::endl;
     }
   }
+  std::cerr << "envstack.size() = " << envstack.size() << std::endl;
 }
 
 int main() {
@@ -277,11 +376,16 @@ int main() {
     Expression(Expression::Type::DEBUG_PRINT, {
       Expression(Expression::Type::INTEGER, 7)
     }),
+    declexpr(intern("x"), intexpr(55371)),
+    Expression(Expression::Type::DEBUG_PRINT, {
+      varexpr(intern("x")),
+    }),
     Expression(Expression::Type::DEBUG_PRINT, {
       Expression(Expression::Type::NIL)
     })
   });
   VirtualMachine vm(new Table(), ProgramCounter(e.compile(), 0));
   vm.run();
-  std::cout << "hi" << std::endl;
+  std::cerr << "hi" << std::endl;
+  return 0;
 }
