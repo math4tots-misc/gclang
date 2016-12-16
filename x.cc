@@ -16,21 +16,10 @@ constexpr int PROD = 391;
 constexpr int GC_MODE = DEBUG;
 
 template <int x, class A, class B> struct Modeswitch;
-
 template <int M, class A, class B> void mode(A a, B b) { Modeswitch<M, A, B>::eval(a, b); }
-
-template <int x, class A, class B>
-struct Modeswitch {};
-
-template <class A, class B>
-struct Modeswitch<DEBUG, A, B> {
-  static void eval(A a, B) { a(); }
-};
-
-template <class A, class B>
-struct Modeswitch<PROD, A, B> {
-  static void eval(A, B b) { b(); }
-};
+template <int x, class A, class B> struct Modeswitch {};
+template <class A, class B> struct Modeswitch<DEBUG, A, B> { static void eval(A a, B) { a(); } };
+template <class A, class B> struct Modeswitch<PROD, A, B> { static void eval(A, B b) { b(); } };
 
 std::string error(const std::string &s) {
   std::cerr << "ERROR: " << s << std::endl;
