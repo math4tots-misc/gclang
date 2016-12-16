@@ -10,10 +10,13 @@
 constexpr int DEBUG = 18761;
 constexpr int PROD = 391;
 
-// If GC_MODE is DEBUG, we run markAndSweep after every bytecode.
+// If MODE_GC is DEBUG, we run markAndSweep after every bytecode.
 // This is meant to surface gc issues, since waiting around to hit a threshold
 // like in prod might hide gc issues.
-constexpr int GC_MODE = DEBUG;
+constexpr int MODE_GC = DEBUG;
+
+// If MODE_BYTECODE is DEBUG, we print the bytecode instruction before each iteration.
+constexpr int MODE_BYTECODE = DEBUG;
 
 template <int x, class A, class B> struct Modeswitch;
 template <int M, class A, class B> void mode(A a, B b) { Modeswitch<M, A, B>::eval(a, b); }
@@ -125,7 +128,7 @@ public:
   Instruction(Type t, Int i): type(t), integer(i) {}
   Instruction(Type t, std::string *s): type(t), name(s) {}
   Instruction(Type t, Blob *b): type(t), blob(b) {}
-  std::string str();
+  std::string debugstr();
 };
 
 std::string str(Instruction::Type t) {
@@ -167,28 +170,7 @@ public:
     ss << headers();
     ss << std::endl;
     for (unsigned int i = 0; i < instructions.size(); i++) {
-      ss << std::setw(7) << i << " ";
-      ss << std::setw(18) << ::str(instructions[i].type);
-      switch (instructions[i].type) {
-      case Instruction::Type::IF:
-      case Instruction::Type::ELSE:
-      case Instruction::Type::CALL:
-      case Instruction::Type::PUSH_INTEGER:
-        ss << instructions[i].integer;
-        break;
-      case Instruction::Type::DECLARE_VARIABLE:
-      case Instruction::Type::PUSH_VARIABLE:
-        ss << (*instructions[i].name);
-        break;
-      case Instruction::Type::PUSH_FUNCTION:
-        ss << ":";
-        for (auto arg: instructions[i].blob->args) {
-          ss << " " << (*arg);
-        }
-        break;
-      default:
-        break;
-      }
+      ss << std::setw(7) << i << instructions[i].debugstr();
       ss << std::endl;
     }
     return ss.str();
@@ -313,6 +295,11 @@ public:
   void incr() { index++; }
   void move(long i) { index = i; }
   Instruction &get() { return blob->instructions[index]; }
+  std::string debugstr() {
+    std::stringstream ss;
+    ss << std::left << blob << " " << std::setw(7) << index;
+    return ss.str();
+  }
 };
 
 class VirtualMachine final {
@@ -353,11 +340,34 @@ void Table::traverse(std::function<void(Object*)> f) {
   }
 }
 
-void Function::traverse(std::function<void(Object*)> f) { f(env); }
-
-std::string Instruction::str() {
-  return ::str(type);
+std::string Instruction::debugstr() {
+  std::ostringstream ss;
+  ss << std::left;
+  ss << std::setw(18) << str(this->type);
+  switch (this->type) {
+  case Instruction::Type::IF:
+  case Instruction::Type::ELSE:
+  case Instruction::Type::CALL:
+  case Instruction::Type::PUSH_INTEGER:
+    ss << this->integer;
+    break;
+  case Instruction::Type::DECLARE_VARIABLE:
+  case Instruction::Type::PUSH_VARIABLE:
+    ss << (*this->name);
+    break;
+  case Instruction::Type::PUSH_FUNCTION:
+    ss << ":";
+    for (auto arg: this->blob->args) {
+      ss << " " << (*arg);
+    }
+    break;
+  default:
+    break;
+  }
+  return ss.str();
 }
+
+void Function::traverse(std::function<void(Object*)> f) { f(env); }
 
 Value Table::get(std::string *key) const {
   auto pair = mapping.find(key);
@@ -442,7 +452,7 @@ void Expression::compile(Blob &b) {
 
 void VirtualMachine::run() {
   while (!(retstack.empty() && pc.done())) {
-    mode<GC_MODE>([&]() -> void {
+    mode<MODE_GC>([&]() -> void {
       markAndSweep();
     }, [&]() -> void {
       stepGc();
@@ -453,6 +463,9 @@ void VirtualMachine::run() {
       envstack.pop_back();
     } else {
       Instruction &i = pc.get();
+      mode<MODE_BYTECODE>([&]() -> void {
+        std::cerr << "MODE_BYTECODE " << pc.debugstr() << " " << i.debugstr() << std::endl;
+      }, [&]() -> void {});
       switch (i.type) {
       case Instruction::Type::INVALID:
         error("Invalid instruction");
