@@ -244,12 +244,24 @@ Expression funcexpr(std::vector<std::string*> args, Expression body) {
   return e;
 }
 
+Expression funcexpr(std::vector<std::string> args, Expression body) {
+  std::vector<std::string*> argsyms;
+  for (auto arg: args) {
+    argsyms.push_back(intern(arg));
+  }
+  return funcexpr(argsyms, body);
+}
+
 Expression declexpr(std::string *s, Expression v) {
   Expression e;
   e.type = Expression::Type::DECLARE;
   e.names.push_back(s);
   e.children.push_back(v);
   return e;
+}
+
+Expression declexpr(std::string s, Expression v) {
+  return declexpr(intern(s), v);
 }
 
 Expression callexpr(Expression f, std::vector<Expression> args) {
@@ -267,6 +279,10 @@ Expression varexpr(std::string *s) {
   e.type = Expression::Type::VARIABLE;
   e.names.push_back(s);
   return e;
+}
+
+Expression varexpr(std::string s) {
+  return varexpr(intern(s));
 }
 
 Expression blockexpr(std::vector<Expression> exprs) {
@@ -620,13 +636,13 @@ int main() {
     printexpr(intexpr(124124)),
     printexpr(intexpr(7)),
     printexpr(ifexpr(nilexpr(), intexpr(11111), intexpr(222222))),
-    declexpr(intern("x"), intexpr(55371)),
-    printexpr(varexpr(intern("x"))),
-    declexpr(intern("f"), funcexpr({intern("a")}, blockexpr({
-      printexpr(varexpr(intern("a"))),
+    declexpr("x", intexpr(55371)),
+    printexpr(varexpr("x")),
+    declexpr("f", funcexpr({"a"}, blockexpr({
+      printexpr(varexpr("a")),
     }))),
-    callexpr(varexpr(intern("f")), {intexpr(777777)}),
-    callexpr(varexpr(intern("f")), {intexpr(9999999999)}),
+    callexpr(varexpr("f"), {intexpr(777777)}),
+    callexpr(varexpr("f"), {intexpr(9999999999)}),
     printexpr(nilexpr())
   });
   Blob *blob = e.compile();
