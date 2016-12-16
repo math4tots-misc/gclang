@@ -10,11 +10,12 @@
 constexpr int DEBUG = 18761;
 constexpr int PROD = 391;
 
-constexpr int MODE = DEBUG;
+// If GC_MODE is DEBUG, we run
+constexpr int GC_MODE = DEBUG;
 
 template <int x, class A, class B> struct Modeswitch;
 
-template <class A, class B> void mode(A a, B b) { Modeswitch<MODE, A, B>::eval(a, b); }
+template <int M, class A, class B> void mode(A a, B b) { Modeswitch<M, A, B>::eval(a, b); }
 
 template <int x, class A, class B>
 struct Modeswitch {};
@@ -450,7 +451,7 @@ void Expression::compile(Blob &b) {
 
 void VirtualMachine::run() {
   while (!(retstack.empty() && pc.done())) {
-    mode([&]() -> void {
+    mode<GC_MODE>([&]() -> void {
       markAndSweep();
     }, [&]() -> void {
       stepGc();
