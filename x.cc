@@ -596,8 +596,8 @@ void VirtualMachine::run() {
         std::cerr << metaint()->size() << std::endl;
         std::cerr << "i.name = " << i.name << std::endl;
         std::cerr << "foo = " << intern("foo") << std::endl;
-        metaint()->declare(intern("foo"), Value());
-        metaint()->get(intern("foo"));
+        // metaint()->declare(intern("foo"), Value());
+        // metaint()->get(intern("foo"));
         std::cerr << "META = " << evalstack.back().meta(this) << std::endl;
         std::cerr << "META2 = " << metaint() << std::endl;
         std::cerr << metaint()->size() << std::endl;
