@@ -95,7 +95,7 @@ public:
 
   // Get the meta Table object for getattr/setattr. Table objects
   // should return itself.
-  Table *meta(VirtualMachine*) const;
+  Table *meta() const;
 };
 
 std::string str(Value::Type t) {
@@ -348,7 +348,6 @@ class VirtualMachine final {
   std::vector<Value> evalstack;
   std::vector<ProgramCounter> retstack;
   std::vector<Table*> envstack;
-  Table *metaint_ = makemetaint();
   ProgramCounter pc;
   long threshold = MIN_THRESHOLD;
 
@@ -356,20 +355,11 @@ class VirtualMachine final {
     return make<Table>();
   }
 
-  Table *makemetaint() {
-    auto m = make<Table>();
-    m->declare(intern("foo"), Value(Value::Type::INTEGER, 8410));
-    std::cerr << "m->size() = " << m->size() << std::endl;
-    return m;
-  }
-
 public:
   VirtualMachine(const ProgramCounter &p): envstack({makeglobal()}), pc(p) {}
   void run();
   void stepGc();
   void markAndSweep();
-
-  Table *metaint() { return metaint_; }
 
   // If you want your object to be gc'd you should use 'make' instead of new
   template <class T, class... Args> T *make(Args&&... args) {
@@ -380,6 +370,7 @@ public:
 };
 
 std::map<std::string, std::string*> internTable;
+Table metaint;
 
 std::string *intern(const std::string &s) {
   if (internTable.find(s) == internTable.end()) {
@@ -388,12 +379,12 @@ std::string *intern(const std::string &s) {
   return internTable[s];
 }
 
-Table *Value::meta(VirtualMachine *vm) const {
+Table *Value::meta() const {
   switch (type) {
     case Type::TABLE:
       return table();
     case Type::INTEGER:
-      return vm->metaint();
+      return &metaint;
     default:
       throw error("Value::meta not implemented for " + str(type));
   }
@@ -593,16 +584,7 @@ void VirtualMachine::run() {
         pc.move(i.integer);
         break;
       case Instruction::Type::GET:
-        std::cerr << metaint()->size() << std::endl;
-        std::cerr << "i.name = " << i.name << std::endl;
-        std::cerr << "foo = " << intern("foo") << std::endl;
-        // metaint()->declare(intern("foo"), Value());
-        // metaint()->get(intern("foo"));
-        std::cerr << "META = " << evalstack.back().meta(this) << std::endl;
-        std::cerr << "META2 = " << metaint() << std::endl;
-        std::cerr << metaint()->size() << std::endl;
-        std::cerr << "META2 = " << str(metaint()->get(intern("foo")).type) << std::endl;
-        evalstack[evalstack.size()] = evalstack.back().meta(this)->get(i.name);
+        evalstack[evalstack.size() - 1] = evalstack.back().meta()->get(i.name);
         pc.incr();
         break;
       case Instruction::Type::PUSH_FUNCTION:
@@ -708,8 +690,10 @@ int main() {
     callexpr(varexpr("f"), {intexpr(777777)}),
     callexpr(varexpr("f"), {intexpr(9999999999)}),
     printexpr(getexpr(intexpr(123123123), "foo")),
+    printexpr(getexpr(intexpr(123123123), "foo")),
     printexpr(nilexpr())
   });
+  metaint.declare(intern("foo"), Value());
   Blob *blob = e.compile();
   std::cout << blob->str() << std::endl;
   VirtualMachine vm(ProgramCounter(blob, 0));
