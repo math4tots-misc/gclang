@@ -20,6 +20,8 @@ constexpr int MODE_GC = DEBUG;
 // If MODE_BYTECODE is DEBUG, we print the bytecode instruction before each iteration.
 constexpr int MODE_BYTECODE = DEBUG;
 
+constexpr long MIN_THRESHOLD = 1000;
+
 template <int x, class A, class B> struct Modeswitch;
 template <int M, class A, class B> void mode(A a, B b) { Modeswitch<M, A, B>::eval(a, b); }
 template <int x, class A, class B> struct Modeswitch {};
@@ -310,7 +312,7 @@ class VirtualMachine final {
   std::vector<ProgramCounter> retstack;
   std::vector<Table*> envstack;
   ProgramCounter pc;
-  long threshold = 1000;
+  long threshold = MIN_THRESHOLD;
 public:
   VirtualMachine(const ProgramCounter &p): envstack({make<Table>()}), pc(p) {}
   void run();
@@ -607,7 +609,7 @@ void VirtualMachine::markAndSweep() {
     }
   }
   std::swap(survivors, allManagedObjects);
-  threshold = 3 * workDone;
+  threshold = 3 * workDone + MIN_THRESHOLD;
 }
 
 }  // namespace gclang
