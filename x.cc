@@ -7,10 +7,12 @@
 #include <utility>
 #include <vector>
 
+namespace gclang {
+
 constexpr int DEBUG = 18761;
 constexpr int PROD = 391;
 
-// If MODE_GC is DEBUG, we run markAndSweep after every bytecode.
+// If MODE_GC is DEBUG, we run full markAndSweep after every bytecode.
 // This is meant to surface gc issues, since waiting around to hit a threshold
 // like in prod might hide gc issues.
 constexpr int MODE_GC = DEBUG;
@@ -608,7 +610,10 @@ void VirtualMachine::markAndSweep() {
   threshold = 3 * workDone;
 }
 
+}  // namespace gclang
+
 int main() {
+  using namespace gclang;
   auto e = blockexpr({
     printexpr(intexpr(124124)),
     printexpr(intexpr(7)),
