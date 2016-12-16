@@ -305,13 +305,13 @@ public:
 };
 
 class VirtualMachine final {
-public:
   std::vector<Object*> allManagedObjects;
   std::vector<Value> evalstack;
   std::vector<ProgramCounter> retstack;
   std::vector<Table*> envstack;
   ProgramCounter pc;
   long threshold = 1000;
+public:
   VirtualMachine(const ProgramCounter &p): envstack({make<Table>()}), pc(p) {}
   void run();
   void stepGc();
