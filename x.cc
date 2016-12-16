@@ -1,12 +1,62 @@
-#include <string>
-#include <vector>
-#include <map>
-#include <iostream>
-#include <sstream>
+#include <functional>
 #include <iomanip>
+#include <iostream>
+#include <map>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
+constexpr int DEBUG = 18761;
+constexpr int PROD = 391;
+
+constexpr int MODE = DEBUG;
+
+template <int x, class A, class B> struct Modeswitch;
+
+template <class A, class B> void mode(A a, B b) { Modeswitch<MODE, A, B>::eval(a, b); }
+
+template <int x, class A, class B>
+struct Modeswitch {};
+
+template <class A, class B>
+struct Modeswitch<DEBUG, A, B> {
+  static void eval(A a, B) { a(); }
+};
+
+template <class A, class B>
+struct Modeswitch<PROD, A, B> {
+  static void eval(A, B b) { b(); }
+};
+
+auto xendl = "\n";
+
+class Stream {
+public:
+  std::ostream *out;
+  Stream(std::ostream *outp): out(outp) {}
+
+  template <class T>
+  Stream &operator<<(T t) {
+    if (out) {
+      (*out) << t;
+    }
+    return *this;
+  }
+};
+
+Stream debug() {
+  std::ostream *out;
+  mode([&]() {
+    out = &std::cerr;
+  }, [&]() {
+    out = nullptr;
+  });
+  return Stream(out);
+}
 
 std::string error(const std::string &s) {
-  std::cerr << "ERROR: " << s << std::endl;
+  debug() << "ERROR: " << s << xendl;
   throw s;
 }
 
@@ -16,26 +66,29 @@ class Table;
 class Function;
 class Instruction;
 class Blob;
+class VirtualMachine;
 using Int = long long;
 
 std::string *intern(const std::string&);
 
 class Object {
 public:
-  enum class Color {
-    BLACK, GRAY, WHITE,
-  };
+  enum class Color { BLACK, WHITE };
   Color color = Color::WHITE;
+  virtual ~Object() {}
+  virtual void traverse(std::function<void(Object*)>)=0;
 };
 
 class Table final: public Object {
-public:
+private:
   Table *proto;
   std::map<std::string*, Value> mapping;
+public:
   Table(): proto(nullptr) {}
   Table(Table *p): proto(p) {}
   Value get(std::string *key) const;
   void declare(std::string *key, Value value);
+  void traverse(std::function<void(Object*)>) override;
 };
 
 class Function final: public Object {
@@ -43,6 +96,7 @@ public:
   Table *env;
   Blob *blob;
   Function(Table *e, Blob *c): env(e), blob(c) {}
+  void traverse(std::function<void(Object*)>) override;
 };
 
 class Value final {
@@ -62,6 +116,8 @@ public:
   Table *table() const { return static_cast<Table*>(obj); }
   Function *function() const { return static_cast<Function*>(obj); }
   bool truthy() const { return type != Type::NIL; }
+  bool isPrimitive() const { return type == Type::NIL || type == Type::INTEGER; }
+  bool isObject() const { return !isPrimitive(); }
 };
 
 std::string str(Value::Type t) {
@@ -143,7 +199,7 @@ public:
     std::ostringstream ss;
     ss << std::left;
     ss << headers();
-    ss << std::endl;
+    ss << xendl;
     for (unsigned int i = 0; i < instructions.size(); i++) {
       ss << std::setw(7) << i << " ";
       ss << std::setw(18) << ::str(instructions[i].type);
@@ -167,7 +223,7 @@ public:
       default:
         break;
       }
-      ss << std::endl;
+      ss << xendl;
     }
     return ss.str();
   }
@@ -295,12 +351,23 @@ public:
 
 class VirtualMachine final {
 public:
+  std::vector<Object*> allManagedObjects;
   std::vector<Value> evalstack;
   std::vector<ProgramCounter> retstack;
   std::vector<Table*> envstack;
   ProgramCounter pc;
-  VirtualMachine(Table *t, const ProgramCounter &p): envstack({t}), pc(p) {}
+  long threshold = 1000;
+  VirtualMachine(const ProgramCounter &p): envstack({make<Table>()}), pc(p) {}
   void run();
+  void stepGc();
+  void markAndSweep();
+
+  // If you want your object to be gc'd you should use 'make' instead of new
+  template <class T, class... Args> T *make(Args&&... args) {
+    auto object = new T(std::forward<Args>(args)...);
+    allManagedObjects.push_back(object);
+    return object;
+  }
 };
 
 std::map<std::string, std::string*> internTable;
@@ -311,6 +378,16 @@ std::string *intern(const std::string &s) {
   }
   return internTable[s];
 }
+
+void Table::traverse(std::function<void(Object*)> f) {
+  for (auto i = mapping.begin(); i != mapping.end(); ++i) {
+    if (i->second.isObject()) {
+      f(i->second.obj);
+    }
+  }
+}
+
+void Function::traverse(std::function<void(Object*)> f) { f(env); }
 
 std::string Instruction::str() {
   return ::str(type);
@@ -376,7 +453,7 @@ void Expression::compile(Blob &b) {
     } else {
       b.instructions.push_back(Instruction(Instruction::Type::BLOCK_START));
       for (unsigned long i = 0; i < children.size() - 1; i++) {
-        std::cerr << "Compiling block i = " << i << " " << str(children[i].type) << std::endl;
+        debug() << "Compiling block i = " << i << " " << str(children[i].type) << xendl;
         children[i].compile(b);
         b.instructions.push_back(Instruction(Instruction::Type::POP));
       }
@@ -399,18 +476,23 @@ void Expression::compile(Blob &b) {
 }
 
 void VirtualMachine::run() {
-  std::cerr << "VirtualMachine::run" << std::endl;
+  debug() << "VirtualMachine::run" << xendl;
   while (!(retstack.empty() && pc.done())) {
+    mode([&]() -> void {
+      markAndSweep();
+    }, [&]() -> void {
+      stepGc();
+    });
     if (pc.done()) {
       pc = retstack.back();
       retstack.pop_back();
       envstack.pop_back();
     } else {
       Instruction &i = pc.get();
-      std::cerr << "-----" << std::endl;
-      std::cerr << "i.type = " << str(i.type) << std::endl;
-      std::cerr << "evalstack.size() = " << evalstack.size() << std::endl;
-      std::cerr << "envstack.size() = " << envstack.size() << std::endl;
+      debug() << "-----" << xendl;
+      debug() << "i.type = " << str(i.type) << xendl;
+      debug() << "evalstack.size() = " << evalstack.size() << xendl;
+      debug() << "envstack.size() = " << envstack.size() << xendl;
       switch (i.type) {
       case Instruction::Type::INVALID:
         error("Invalid instruction");
@@ -428,7 +510,7 @@ void VirtualMachine::run() {
         default:
           break;
         }
-        std::cout << std::endl;
+        std::cout << xendl;
         pc.incr();
         break;
       case Instruction::Type::PUSH_INTEGER:
@@ -440,11 +522,11 @@ void VirtualMachine::run() {
         pc.incr();
         break;
       case Instruction::Type::BLOCK_START:
-        envstack.push_back(new Table(envstack.back()));
+        envstack.push_back(make<Table>(envstack.back()));
         pc.incr();
         break;
       case Instruction::Type::BLOCK_END:
-        std::cerr << "envstack.size() = " << envstack.size() << std::endl;
+        debug() << "envstack.size() = " << envstack.size() << xendl;
         envstack.pop_back();
         pc.incr();
         break;
@@ -468,7 +550,7 @@ void VirtualMachine::run() {
         pc.move(i.integer);
         break;
       case Instruction::Type::PUSH_FUNCTION:
-        evalstack.push_back(Value(Value::Type::FUNCTION, new Function(envstack.back(), i.blob)));
+        evalstack.push_back(Value(Value::Type::FUNCTION, make<Function>(envstack.back(), i.blob)));
         pc.incr();
         break;
       case Instruction::Type::CALL:
@@ -478,7 +560,7 @@ void VirtualMachine::run() {
             retstack.push_back(pc);
             auto f = evalstack.back().function();
             evalstack.pop_back();
-            auto env = new Table(f->env);
+            auto env = make<Table>(f->env);
             envstack.push_back(env);
             auto nargs = i.integer;
             if (static_cast<unsigned long>(nargs) != f->blob->args.size()) {
@@ -500,11 +582,78 @@ void VirtualMachine::run() {
       case Instruction::Type::TAILCALL:
         error("Not yet implemented");
       }
-      // std::cerr << "2 i.type = " << str(i.type) << std::endl;
-      std::cerr << "2 evalstack.size() = " << evalstack.size() << std::endl;
+      // debug() << "2 i.type = " << str(i.type) << xendl;
+      debug() << "2 evalstack.size() = " << evalstack.size() << xendl;
     }
   }
-  std::cerr << "envstack.size() = " << envstack.size() << std::endl;
+  debug() << "envstack.size() = " << envstack.size() << xendl;
+}
+
+void VirtualMachine::stepGc() {
+  if (allManagedObjects.size() >= static_cast<unsigned long>(threshold)) {
+    markAndSweep();
+  }
+}
+
+void VirtualMachine::markAndSweep() {
+  debug() << "GC START: threshold = " << threshold << " evalstack.size() = " << evalstack.size() << " envstack.size() = " << envstack.size() << " allManagedObjects.size() = " << allManagedObjects.size() << xendl;
+  long workDone = 0;
+  // mark
+  std::vector<Object*> greyStack;
+  for (Value &v: evalstack) {
+    workDone++;
+    if (v.isObject() && v.obj && v.obj->color == Object::Color::WHITE) {
+      v.obj->color = Object::Color::BLACK;
+      greyStack.push_back(v.obj);
+    }
+  }
+  for (Table *t: envstack) {
+    workDone++;
+    if (t && t->color == Object::Color::WHITE) {
+      t->color = Object::Color::BLACK;
+      greyStack.push_back(t);
+    }
+  }
+  debug() << "POPPING GREY STACK" << xendl;
+  for (Object *p: greyStack) {
+    debug() << "On greyStack: " << p << xendl;
+  }
+  while (!greyStack.empty()) {
+    Object *p = greyStack.back();
+    greyStack.pop_back();
+    debug() << "p = " << p << xendl;
+    p->traverse([&](Object *q) {
+      workDone++;
+      if (q && q->color == Object::Color::WHITE) {
+        q->color = Object::Color::BLACK;
+        greyStack.push_back(q);
+      }
+    });
+  }
+  // sweep
+  debug() << "STARTING SWEEP" << xendl;
+  std::vector<Object*> survivors;
+  for (Object *p: allManagedObjects) {
+    workDone++;
+    debug() << "Considering: " << p << xendl;
+    if (p->color == Object::Color::WHITE) {
+      debug() << "deleting " << p << xendl;
+      delete p;
+    } else {
+      debug() << "saving " << p << xendl;
+      p->color = Object::Color::WHITE;
+      survivors.push_back(p);
+    }
+  }
+  long nalive = survivors.size();
+  long ndead = allManagedObjects.size() - nalive;
+  debug() << "GC: WorkDone = " << workDone << " Deleted = " << ndead << ", Survived = " << nalive << xendl;
+  std::swap(survivors, allManagedObjects);
+  debug() << "Remaining = " << allManagedObjects.size() << xendl;
+  for (Object *p: allManagedObjects) {
+    debug() << "Survivor p = " << p << xendl;
+  }
+  threshold = 3 * workDone;
 }
 
 int main() {
@@ -522,9 +671,9 @@ int main() {
     printexpr(nilexpr())
   });
   Blob *blob = e.compile();
-  std::cout << blob->str() << std::endl;
-  VirtualMachine vm(new Table(), ProgramCounter(blob, 0));
+  std::cout << blob->str() << xendl;
+  VirtualMachine vm(ProgramCounter(blob, 0));
   vm.run();
-  std::cerr << "hi" << std::endl;
+  debug() << "hi" << xendl;
   return 0;
 }
