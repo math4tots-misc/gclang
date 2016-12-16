@@ -62,6 +62,7 @@ public:
   Value get(std::string *key) const;
   void declare(std::string *key, Value value);
   void traverse(std::function<void(Object*)>) override;
+  Int size() const { return mapping.size(); }
 };
 
 class Function final: public Object {
@@ -91,6 +92,10 @@ public:
   bool truthy() const { return type != Type::NIL; }
   bool isPrimitive() const { return type == Type::NIL || type == Type::INTEGER; }
   bool isObject() const { return !isPrimitive(); }
+
+  // Get the meta Table object for getattr/setattr. Table objects
+  // should return itself.
+  Table *meta(VirtualMachine*) const;
 };
 
 std::string str(Value::Type t) {
@@ -119,6 +124,7 @@ public:
     ELSE,  // unconditional jump to 'integer' (i.e. jump to end of else)
     POP,  // pops value on top of stack -- between blocks
     CALL,  // calls function using 'integer' arguments.
+    GET,  // pops object from top of stack and returns 'name' attribute of popped
     TAILCALL,  // calls function using 'integer' arguments, must be last op
     DEBUG_PRINT,  // Debugging mechanism -- print top of stack
   };
@@ -149,6 +155,7 @@ std::string str(Instruction::Type t) {
   case Instruction::Type::ELSE: return "ELSE";
   case Instruction::Type::POP: return "POP";
   case Instruction::Type::CALL: return "CALL";
+  case Instruction::Type::GET: return "GET";
   case Instruction::Type::TAILCALL: return "TAILCALL";
   case Instruction::Type::DEBUG_PRINT: return "DEBUG_PRINT";
   }
@@ -192,6 +199,7 @@ public:
     CALL,  // apply(eval(children[0]), map(eval, children[1...])
     IF,  // eval(children[0]) ? eval(children[1]) : eval(children[2])
     BLOCK,  // eval(children[-1])
+    GET,  // getitem(eval(children[0]), names[0])
     DEBUG_PRINT,
   };
   Type type;
@@ -217,6 +225,7 @@ std::string str(Expression::Type t) {
   case Expression::Type::CALL: return "CALL";
   case Expression::Type::IF: return "IF";
   case Expression::Type::BLOCK: return "BLOCK";
+  case Expression::Type::GET: return "GET";
   case Expression::Type::DEBUG_PRINT: return "DEBUG_PRINT";
   }
   error("Invalid Expression::Type = " + std::to_string(static_cast<int>(t)));
@@ -274,6 +283,18 @@ Expression callexpr(Expression f, std::vector<Expression> args) {
   return e;
 }
 
+Expression getexpr(Expression owner, std::string *attr) {
+  Expression e;
+  e.type = Expression::Type::GET;
+  e.children.push_back(owner);
+  e.names.push_back(attr);
+  return e;
+}
+
+Expression getexpr(Expression owner, std::string s) {
+  return getexpr(owner, intern(s));
+}
+
 Expression varexpr(std::string *s) {
   Expression e;
   e.type = Expression::Type::VARIABLE;
@@ -327,13 +348,28 @@ class VirtualMachine final {
   std::vector<Value> evalstack;
   std::vector<ProgramCounter> retstack;
   std::vector<Table*> envstack;
+  Table *metaint_ = makemetaint();
   ProgramCounter pc;
   long threshold = MIN_THRESHOLD;
+
+  Table *makeglobal() {
+    return make<Table>();
+  }
+
+  Table *makemetaint() {
+    auto m = make<Table>();
+    m->declare(intern("foo"), Value(Value::Type::INTEGER, 8410));
+    std::cerr << "m->size() = " << m->size() << std::endl;
+    return m;
+  }
+
 public:
-  VirtualMachine(const ProgramCounter &p): envstack({make<Table>()}), pc(p) {}
+  VirtualMachine(const ProgramCounter &p): envstack({makeglobal()}), pc(p) {}
   void run();
   void stepGc();
   void markAndSweep();
+
+  Table *metaint() { return metaint_; }
 
   // If you want your object to be gc'd you should use 'make' instead of new
   template <class T, class... Args> T *make(Args&&... args) {
@@ -350,6 +386,17 @@ std::string *intern(const std::string &s) {
     internTable[s] = new std::string(s);
   }
   return internTable[s];
+}
+
+Table *Value::meta(VirtualMachine *vm) const {
+  switch (type) {
+    case Type::TABLE:
+      return table();
+    case Type::INTEGER:
+      return vm->metaint();
+    default:
+      throw error("Value::meta not implemented for " + str(type));
+  }
 }
 
 void Table::traverse(std::function<void(Object*)> f) {
@@ -456,6 +503,10 @@ void Expression::compile(Blob &b) {
       b.instructions.push_back(Instruction(Instruction::Type::BLOCK_END));
     }
     break;
+  case Type::GET:
+    children[0].compile(b);
+    b.instructions.push_back(Instruction(Instruction::Type::GET, names[0]));
+    break;
   case Type::IF:
     children[0].compile(b);
     long ifpos = b.instructions.size();
@@ -540,6 +591,19 @@ void VirtualMachine::run() {
         break;
       case Instruction::Type::ELSE:
         pc.move(i.integer);
+        break;
+      case Instruction::Type::GET:
+        std::cerr << metaint()->size() << std::endl;
+        std::cerr << "i.name = " << i.name << std::endl;
+        std::cerr << "foo = " << intern("foo") << std::endl;
+        metaint()->declare(intern("foo"), Value());
+        metaint()->get(intern("foo"));
+        std::cerr << "META = " << evalstack.back().meta(this) << std::endl;
+        std::cerr << "META2 = " << metaint() << std::endl;
+        std::cerr << metaint()->size() << std::endl;
+        std::cerr << "META2 = " << str(metaint()->get(intern("foo")).type) << std::endl;
+        evalstack[evalstack.size()] = evalstack.back().meta(this)->get(i.name);
+        pc.incr();
         break;
       case Instruction::Type::PUSH_FUNCTION:
         evalstack.push_back(Value(Value::Type::FUNCTION, make<Function>(envstack.back(), i.blob)));
@@ -643,6 +707,7 @@ int main() {
     }))),
     callexpr(varexpr("f"), {intexpr(777777)}),
     callexpr(varexpr("f"), {intexpr(9999999999)}),
+    printexpr(getexpr(intexpr(123123123), "foo")),
     printexpr(nilexpr())
   });
   Blob *blob = e.compile();
