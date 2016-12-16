@@ -10,7 +10,9 @@
 constexpr int DEBUG = 18761;
 constexpr int PROD = 391;
 
-// If GC_MODE is DEBUG, we run
+// If GC_MODE is DEBUG, we run markAndSweep after every bytecode.
+// This is meant to surface gc issues, since waiting around to hit a threshold
+// like in prod might hide gc issues.
 constexpr int GC_MODE = DEBUG;
 
 template <int x, class A, class B> struct Modeswitch;
