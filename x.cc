@@ -42,6 +42,8 @@ class Blob;
 class VirtualMachine;
 using Int = long long;
 
+extern Table metaint;
+
 std::string *intern(const std::string&);
 
 class Object {
@@ -352,11 +354,15 @@ class VirtualMachine final {
   long threshold = MIN_THRESHOLD;
 
   Table *makeglobal() {
-    return make<Table>();
+    auto t = make<Table>();
+    t->declare(intern("Int"), Value(Value::Type::TABLE, &metaint));
+    return t;
   }
 
 public:
-  VirtualMachine(const ProgramCounter &p): envstack({makeglobal()}), pc(p) {}
+  VirtualMachine(const ProgramCounter &p): pc(p) {
+    envstack.push_back(makeglobal());
+  }
   void run();
   void stepGc();
   void markAndSweep();
@@ -678,6 +684,7 @@ void VirtualMachine::markAndSweep() {
 
 int main() {
   using namespace gclang;
+  metaint.declare(intern("foo"), Value());
   auto e = blockexpr({
     printexpr(intexpr(124124)),
     printexpr(intexpr(7)),
@@ -693,7 +700,6 @@ int main() {
     printexpr(getexpr(intexpr(123123123), "foo")),
     printexpr(nilexpr())
   });
-  metaint.declare(intern("foo"), Value());
   Blob *blob = e.compile();
   std::cout << blob->str() << std::endl;
   VirtualMachine vm(ProgramCounter(blob, 0));
