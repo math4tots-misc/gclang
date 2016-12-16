@@ -29,34 +29,8 @@ struct Modeswitch<PROD, A, B> {
   static void eval(A, B b) { b(); }
 };
 
-auto xendl = "\n";
-
-class Stream {
-public:
-  std::ostream *out;
-  Stream(std::ostream *outp): out(outp) {}
-
-  template <class T>
-  Stream &operator<<(T t) {
-    if (out) {
-      (*out) << t;
-    }
-    return *this;
-  }
-};
-
-Stream debug() {
-  std::ostream *out;
-  mode([&]() {
-    out = &std::cerr;
-  }, [&]() {
-    out = nullptr;
-  });
-  return Stream(out);
-}
-
 std::string error(const std::string &s) {
-  debug() << "ERROR: " << s << xendl;
+  std::cerr << "ERROR: " << s << std::endl;
   throw s;
 }
 
@@ -199,7 +173,7 @@ public:
     std::ostringstream ss;
     ss << std::left;
     ss << headers();
-    ss << xendl;
+    ss << std::endl;
     for (unsigned int i = 0; i < instructions.size(); i++) {
       ss << std::setw(7) << i << " ";
       ss << std::setw(18) << ::str(instructions[i].type);
@@ -223,7 +197,7 @@ public:
       default:
         break;
       }
-      ss << xendl;
+      ss << std::endl;
     }
     return ss.str();
   }
@@ -453,7 +427,6 @@ void Expression::compile(Blob &b) {
     } else {
       b.instructions.push_back(Instruction(Instruction::Type::BLOCK_START));
       for (unsigned long i = 0; i < children.size() - 1; i++) {
-        debug() << "Compiling block i = " << i << " " << str(children[i].type) << xendl;
         children[i].compile(b);
         b.instructions.push_back(Instruction(Instruction::Type::POP));
       }
@@ -476,7 +449,6 @@ void Expression::compile(Blob &b) {
 }
 
 void VirtualMachine::run() {
-  debug() << "VirtualMachine::run" << xendl;
   while (!(retstack.empty() && pc.done())) {
     mode([&]() -> void {
       markAndSweep();
@@ -489,10 +461,6 @@ void VirtualMachine::run() {
       envstack.pop_back();
     } else {
       Instruction &i = pc.get();
-      debug() << "-----" << xendl;
-      debug() << "i.type = " << str(i.type) << xendl;
-      debug() << "evalstack.size() = " << evalstack.size() << xendl;
-      debug() << "envstack.size() = " << envstack.size() << xendl;
       switch (i.type) {
       case Instruction::Type::INVALID:
         error("Invalid instruction");
@@ -510,7 +478,7 @@ void VirtualMachine::run() {
         default:
           break;
         }
-        std::cout << xendl;
+        std::cout << std::endl;
         pc.incr();
         break;
       case Instruction::Type::PUSH_INTEGER:
@@ -526,7 +494,6 @@ void VirtualMachine::run() {
         pc.incr();
         break;
       case Instruction::Type::BLOCK_END:
-        debug() << "envstack.size() = " << envstack.size() << xendl;
         envstack.pop_back();
         pc.incr();
         break;
@@ -582,11 +549,8 @@ void VirtualMachine::run() {
       case Instruction::Type::TAILCALL:
         error("Not yet implemented");
       }
-      // debug() << "2 i.type = " << str(i.type) << xendl;
-      debug() << "2 evalstack.size() = " << evalstack.size() << xendl;
     }
   }
-  debug() << "envstack.size() = " << envstack.size() << xendl;
 }
 
 void VirtualMachine::stepGc() {
@@ -596,7 +560,6 @@ void VirtualMachine::stepGc() {
 }
 
 void VirtualMachine::markAndSweep() {
-  debug() << "GC START: threshold = " << threshold << " evalstack.size() = " << evalstack.size() << " envstack.size() = " << envstack.size() << " allManagedObjects.size() = " << allManagedObjects.size() << xendl;
   long workDone = 0;
   // mark
   std::vector<Object*> greyStack;
@@ -614,14 +577,9 @@ void VirtualMachine::markAndSweep() {
       greyStack.push_back(t);
     }
   }
-  debug() << "POPPING GREY STACK" << xendl;
-  for (Object *p: greyStack) {
-    debug() << "On greyStack: " << p << xendl;
-  }
   while (!greyStack.empty()) {
     Object *p = greyStack.back();
     greyStack.pop_back();
-    debug() << "p = " << p << xendl;
     p->traverse([&](Object *q) {
       workDone++;
       if (q && q->color == Object::Color::WHITE) {
@@ -631,28 +589,17 @@ void VirtualMachine::markAndSweep() {
     });
   }
   // sweep
-  debug() << "STARTING SWEEP" << xendl;
   std::vector<Object*> survivors;
   for (Object *p: allManagedObjects) {
     workDone++;
-    debug() << "Considering: " << p << xendl;
     if (p->color == Object::Color::WHITE) {
-      debug() << "deleting " << p << xendl;
       delete p;
     } else {
-      debug() << "saving " << p << xendl;
       p->color = Object::Color::WHITE;
       survivors.push_back(p);
     }
   }
-  long nalive = survivors.size();
-  long ndead = allManagedObjects.size() - nalive;
-  debug() << "GC: WorkDone = " << workDone << " Deleted = " << ndead << ", Survived = " << nalive << xendl;
   std::swap(survivors, allManagedObjects);
-  debug() << "Remaining = " << allManagedObjects.size() << xendl;
-  for (Object *p: allManagedObjects) {
-    debug() << "Survivor p = " << p << xendl;
-  }
   threshold = 3 * workDone;
 }
 
@@ -671,9 +618,8 @@ int main() {
     printexpr(nilexpr())
   });
   Blob *blob = e.compile();
-  std::cout << blob->str() << xendl;
+  std::cout << blob->str() << std::endl;
   VirtualMachine vm(ProgramCounter(blob, 0));
   vm.run();
-  debug() << "hi" << xendl;
   return 0;
 }
