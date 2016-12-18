@@ -15,10 +15,13 @@ constexpr int PROD = 391;
 // If MODE_GC is DEBUG, we run full markAndSweep after every bytecode.
 // This is meant to surface gc issues, since waiting around to hit a threshold
 // like in prod might hide gc issues.
-constexpr int MODE_GC = DEBUG;
+constexpr int MODE_GC = PROD;
 
 // If MODE_BYTECODE is DEBUG, we print the bytecode instruction before each iteration.
-constexpr int MODE_BYTECODE = DEBUG;
+constexpr int MODE_BYTECODE = PROD;
+
+// MODE_COMPILE = DEBUG => print compiled bytecode to stderr
+constexpr int MODE_COMPILE = DEBUG;
 
 constexpr long MIN_THRESHOLD = 1000;
 
@@ -212,6 +215,9 @@ public:
   Blob *compile() {
     Blob *blob = new Blob();
     compile(*blob);
+    mode<MODE_COMPILE>([&]() {
+      std::cerr << "DEBUG COMPILE: " << blob->str() << std::endl;
+    }, [](){});
     return blob;
   }
   Expression()=default;
@@ -701,7 +707,6 @@ int main() {
     printexpr(nilexpr())
   });
   Blob *blob = e.compile();
-  std::cout << blob->str() << std::endl;
   VirtualMachine vm(ProgramCounter(blob, 0));
   vm.run();
   return 0;
