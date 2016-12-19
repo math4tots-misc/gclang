@@ -230,11 +230,7 @@ public:
 
 // variable definitions
 StackPointer nil(make<Nil>());
-StackPointer metaint(make<Table>(nullptr, {
-  intern("__add"), make<Function>([](P owner, const std::vector<P> &) -> P {
-    return owner;
-  }),
-}));
+StackPointer metaint(make<Table>(nullptr));
 
 // function definitions
 E mkblock(std::vector<E> stmts) { return std::make_shared<Block>(stmts); }
