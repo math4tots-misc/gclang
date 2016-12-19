@@ -48,10 +48,12 @@ public:
     return ss.str();
   }
   virtual P call(P, const std::vector<StackPointer>&) { throw "Not implemented"; }
-  virtual P get(Symbol) { throw "Not implemented"; }
   P callm(Symbol methodName, const std::vector<StackPointer> &args) {
     return meta()->get(methodName)->call(this, args);
   }
+  virtual P get(Symbol) { throw "Not implemented"; }
+  virtual void declare(Symbol, P) { throw "Not implemented"; }
+  virtual void set(Symbol, P) { throw "Not implemented"; }
 };
 
 class StackPointer final {
@@ -136,10 +138,46 @@ public:
   std::map<Symbol, P> buffer;
   Table(Table *p): proto(p) {}
   void traverse(std::function<void(P)> f) override {
-    f(proto);
+    if (proto) {
+      f(proto);
+    }
     for (auto iter = buffer.begin(); iter != buffer.end(); ++iter) {
       f(iter->second);
     }
+  }
+  P get(Symbol s) override {
+    auto iter = buffer.find(s);
+    if (iter != buffer.end()) {
+      return iter->second;
+    }
+    if (proto) {
+      return proto->get(s);
+    }
+    throw "No such symbol: " + *s;
+  }
+  void declare(Symbol s, P v) override {
+    if (buffer.find(s) != buffer.end()) {
+      throw "Already declared";
+    }
+    buffer[s] = v;
+  }
+  void set(Symbol s, P v) override {
+    if (buffer.find(s) == buffer.end()) {
+      buffer[s] = v;
+    } else if (proto) {
+      proto->set(s, v);
+    } else {
+      throw "No such key: " + *s;
+    }
+  }
+};
+
+class Function final: public Object {
+  P(*const fptr)(P, std::vector<StackPointer>);
+  Function(P(*f)(P, std::vector<StackPointer>)): fptr(f) {}
+  void traverse(std::function<void(P)>) override {}
+  P call(P owner, const std::vector<StackPointer> &args) override {
+    return fptr(owner, args);
   }
 };
 
