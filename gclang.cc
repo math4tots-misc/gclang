@@ -176,6 +176,7 @@ public:
 };
 
 class Function final: public Object {
+public:
   P(*const fptr)(P, const std::vector<StackPointer>&);
   Function(P(*f)(P, const std::vector<StackPointer>&)): fptr(f) {}
   void traverse(std::function<void(P)>) override {}
@@ -183,6 +184,10 @@ class Function final: public Object {
     return fptr(owner, args);
   }
 };
+
+P mkfunc(P(*f)(P, const std::vector<StackPointer>&)) {
+  return make<Function>(f);
+}
 
 class Expression: public std::enable_shared_from_this<Expression> {
 public:
@@ -314,4 +319,9 @@ int main() {
   std::cout << mks("Hello world!")->equals(mks("Hello world!")) << std::endl;
   auto c = mkif(mklit(mkn(0)), mklit(nil), mklit(mkn(5)))->eval(nullptr);
   std::cout << c->debugstr() << std::endl;
+  {
+    auto flit = mklit(mkfunc([](P, const std::vector<P>&) -> P {
+      return nil;
+    }));
+  }
 }
