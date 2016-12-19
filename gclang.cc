@@ -55,6 +55,7 @@ public:
     ss << typeid(*this).name() << "@" << this;
     return ss.str();
   }
+  virtual P call(P, std::vector<StackPointer>) { throw "Not implemented"; }
 };
 
 class StackPointer final {
