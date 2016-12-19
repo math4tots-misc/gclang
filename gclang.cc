@@ -20,6 +20,7 @@ using P = Object*;
 using E = std::shared_ptr<Expression>;
 
 extern StackPointer nil;
+extern StackPointer metaint;
 
 std::map<std::string, Symbol> internTable;
 std::vector<P> allManagedObjects;
@@ -84,6 +85,7 @@ public:
     auto q = dynamic_cast<Number*>(p);
     return q && value == q->value;
   }
+  P meta() override { return metaint; }
   std::string debugstr() const override {
     std::stringstream ss;
     ss << "num(" << value << ")";
@@ -137,6 +139,7 @@ public:
   Table *const proto;
   std::map<Symbol, P> buffer;
   Table(Table *p): proto(p) {}
+  Table(Table *p, const std::map<Symbol, P> &b): proto(p), buffer(b) {}
   void traverse(std::function<void(P)> f) override {
     if (proto) {
       f(proto);
@@ -173,8 +176,8 @@ public:
 };
 
 class Function final: public Object {
-  P(*const fptr)(P, std::vector<StackPointer>);
-  Function(P(*f)(P, std::vector<StackPointer>)): fptr(f) {}
+  P(*const fptr)(P, const std::vector<StackPointer>&);
+  Function(P(*f)(P, const std::vector<StackPointer>&)): fptr(f) {}
   void traverse(std::function<void(P)>) override {}
   P call(P owner, const std::vector<StackPointer> &args) override {
     return fptr(owner, args);
@@ -225,8 +228,15 @@ public:
   }
 };
 
+// variable definitions
 StackPointer nil(make<Nil>());
+StackPointer metaint(make<Table>(nullptr, {
+  intern("__add"), make<Function>([](P owner, const std::vector<P> &) -> P {
+    return owner;
+  }),
+}));
 
+// function definitions
 E mkblock(std::vector<E> stmts) { return std::make_shared<Block>(stmts); }
 
 Symbol intern(const std::string &s) {
