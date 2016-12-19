@@ -1,10 +1,11 @@
 #include <functional>
 #include <iostream>
+#include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
-#include <sstream>
 
 #define DEBUG_GC 1
 
@@ -12,32 +13,22 @@ namespace gclang {
 
 class Object;
 class Expression;
+class StackPointer;
 
+using Symbol = std::string*;
 using P = Object*;
 using E = std::shared_ptr<Expression>;
 
+extern StackPointer nil;
+
+std::map<std::string, Symbol> internTable;
 std::vector<P> allManagedObjects;
 long threshold = 1000;
 
+Symbol intern(const std::string&);
 void markAndSweep();
 
-template <class T, class ...Args>
-T *make(Args &&...args) {
-
-#if DEBUG_GC
-  // NOTE: For debugging, do a full markAndSweep every time we allocate an
-  // object
-  markAndSweep();
-#else
-  if (allManagedObjects.size() > threshold) {
-    markAndSweep();
-  }
-#endif
-
-  T *t = new T(std::forward<Args>(args)...);
-  allManagedObjects.push_back(t);
-  return t;
-}
+template <class T, class ...Args> T *make(Args &&...args);
 
 class Object {
 public:
@@ -48,6 +39,7 @@ public:
   Object()=default;
   virtual ~Object() {}
   virtual void traverse(std::function<void(P)>)=0;
+  virtual P meta() { throw "Not implemented"; }
   virtual bool truthy() { return true; }
   virtual bool equals(P p) { return this == p; }
   virtual std::string debugstr() const {
@@ -55,7 +47,11 @@ public:
     ss << typeid(*this).name() << "@" << this;
     return ss.str();
   }
-  virtual P call(P, std::vector<StackPointer>) { throw "Not implemented"; }
+  virtual P call(P, const std::vector<StackPointer>&) { throw "Not implemented"; }
+  virtual P get(Symbol) { throw "Not implemented"; }
+  P callm(Symbol methodName, const std::vector<StackPointer> &args) {
+    return meta()->get(methodName)->call(this, args);
+  }
 };
 
 class StackPointer final {
@@ -74,8 +70,6 @@ class Nil final: public Object {
   bool truthy() override { return false; }
   std::string debugstr() const override { return "nil"; }
 };
-
-StackPointer nil(new Nil());
 
 class Number final: public Object {
 public:
@@ -136,6 +130,19 @@ public:
   }
 };
 
+class Table final: public Object {
+public:
+  Table *const proto;
+  std::map<Symbol, P> buffer;
+  Table(Table *p): proto(p) {}
+  void traverse(std::function<void(P)> f) override {
+    f(proto);
+    for (auto iter = buffer.begin(); iter != buffer.end(); ++iter) {
+      f(iter->second);
+    }
+  }
+};
+
 class Expression: public std::enable_shared_from_this<Expression> {
 public:
   virtual P eval(P env)=0;
@@ -180,7 +187,20 @@ public:
   }
 };
 
+StackPointer nil(make<Nil>());
+
 E mkblock(std::vector<E> stmts) { return std::make_shared<Block>(stmts); }
+
+Symbol intern(const std::string &s) {
+  auto iter = internTable.find(s);
+  if (iter != internTable.end()) {
+    return iter->second;
+  } else {
+    auto sym = new std::string(s);
+    internTable[s] = sym;
+    return sym;
+  }
+}
 
 void markAndSweep() {
   long workDone = 0;
@@ -218,6 +238,24 @@ void markAndSweep() {
 
   allManagedObjects = std::move(survivors);
 }
+template <class T, class ...Args>
+T *make(Args &&...args) {
+
+#if DEBUG_GC
+  // NOTE: For debugging, do a full markAndSweep every time we allocate an
+  // object
+  markAndSweep();
+#else
+  if (allManagedObjects.size() > threshold) {
+    markAndSweep();
+  }
+#endif
+
+  T *t = new T(std::forward<Args>(args)...);
+  allManagedObjects.push_back(t);
+  return t;
+}
+
 
 }  // namespace gclang
 
